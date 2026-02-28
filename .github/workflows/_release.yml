@@ -56,7 +56,8 @@ jobs:
       - build
     uses:
       ./.github/workflows/_test_release.yml
-    permissions: write-all
+    permissions:
+      id-token: write
     secrets: inherit
 
   pre-release-checks:
