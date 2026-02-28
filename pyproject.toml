@@ -51,6 +51,9 @@ dev = [
     { include-group = "typing" },
 ]
 
+[tool.uv]
+environments = ["platform_python_implementation == 'CPython'"]
+
 [tool.mypy]
 disallow_untyped_defs = "True"
 
