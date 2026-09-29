@@ -54,19 +54,9 @@ jobs:
           echo pkg-name="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['name'])")" >> $GITHUB_OUTPUT
           echo version="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")" >> $GITHUB_OUTPUT
 
-  test-pypi-publish:
-    needs:
-      - build
-    uses:
-      ./.github/workflows/_test_release.yml
-    permissions:
-      id-token: write
-    secrets: inherit
-
   pre-release-checks:
     needs:
       - build
-      - test-pypi-publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,32 +66,21 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Import published package
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: ./dist/
+
+      - name: Import dist package
         shell: bash
         env:
           PKG_NAME: ${{ needs.build.outputs.pkg-name }}
           VERSION: ${{ needs.build.outputs.version }}
-        # Here we use:
-        # - The default regular PyPI index as the *primary* index, meaning 
-        #   that it takes priority (https://pypi.org/simple)
-        # - The test PyPI index as an extra index, so that any dependencies that
-        #   are not found on test PyPI can be resolved and installed anyway.
-        #   (https://test.pypi.org/simple). This will include the PKG_NAME==VERSION
-        #   package because VERSION will not have been uploaded to regular PyPI yet.
-        # - attempt install again after 5 seconds if it fails because there is
-        #   sometimes a delay in availability on test pypi
+        # Install directly from the locally-built wheel (no index resolution needed).
         run: |
           uv sync
 
-          uv pip install \
-            --extra-index-url https://test.pypi.org/simple/ \
-            "$PKG_NAME==$VERSION" || \
-          ( \
-            sleep 5 && \
-            uv pip install \
-              --extra-index-url https://test.pypi.org/simple/ \
-              "$PKG_NAME==$VERSION" \
-          )
+          uv pip install dist/*.whl
 
           # Replace all dashes in the package name with underscores,
           # since that's how Python imports packages with dashes in the name.
@@ -112,7 +91,7 @@ jobs:
       - name: Import test dependencies
         run: uv sync --group test --group test_integration
 
-      # Overwrite the local version of the package with the test PyPI version.
+      # Overwrite the local version of the package with the built version
       - name: Import published package (again)
         shell: bash
         env:
@@ -121,9 +100,7 @@ jobs:
         run: |
           uv sync
 
-          uv pip install \
-            --extra-index-url https://test.pypi.org/simple/ \
-            "$PKG_NAME==$VERSION"
+          uv pip install dist/*.whl
 
       - name: Run unit tests
         run: make tests
@@ -149,6 +126,16 @@ jobs:
         run: |
           uv pip install $MIN_VERSIONS
           make tests
+
+  test-pypi-publish:
+    needs:
+      - build
+      - pre-release-checks
+    uses:
+      ./.github/workflows/_test_release.yml
+    permissions:
+      id-token: write
+    secrets: inherit
 
   publish:
     needs:
